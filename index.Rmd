@@ -1,0 +1,144 @@
+---
+title: "JHU_PracticalMachineLearning_Assignment4"
+author: "Danilo Steckelberg"
+date: "6/2/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Project description
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Method
+The analysis made in this project considers the following steps:
+1) Downloading, loading and cleaning the data;
+2) Testing Machine Learning algorithms, understanding the best predictor and using it to predict the test data set. The algorithms used in this analysis is Decision Trees and Random Forests.
+
+These models are chosen since they are the ones presented in course that are most suitable for predicting classification objects.
+
+## Downloading, loading and cleaning the data
+```{r data.reading}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+
+#### Download the training and validation data files ####
+dataset.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+validation.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+dataset.filename <- "pml-training.csv"
+validation.filename <- "pml-testing.csv"
+
+download.file(dataset.url, dataset.filename)
+download.file(validation.url, validation.filename)
+
+dataset <- read.csv(dataset.filename, na.strings = c("NA","#DIV/0!",""))
+dataset.variables <- dim(dataset)[2]
+dataset.entries <- dim(dataset)[1]
+
+validation <- read.csv(validation.filename, na.strings = c("NA","#DIV/0!",""))
+validation.variables <- dim(validation)[2]
+validation.entries <- dim(validation)[1]
+
+# Checking if variables are the same in both dataset and validation set
+numOfVarsCheck <- ifelse(validation.variables == dataset.variables,TRUE,FALSE)
+numOfMatchinVariables <- sum(ifelse(colnames(validation)==colnames(dataset),1,0))
+if(numOfVarsCheck == TRUE & numOfMatchinVariables == dataset.variables-1){
+  print("All variables equal except for output variable - We are good to go :)")
+}else{warning("Variables Mismatch - please check variables")}
+dim(dataset); dim(validation)
+head(dataset)
+```
+We have a data set with 19622 observations of 160 variables, and a validation set with 20 observations and 160 variables. We checked if all variables are the same, and they match. No need to modify anything so far.
+
+Taking a look at the dataset, we see a lot of NAs. For the sake of simplicity, we will not use those variables. If we run the models and the predicting variables are not sufficient to explain the classes reasonably, we will have to revisit and process theses variables with NAs so they are useful.
+
+We also understand that the quality of exercises should be time independent. So we won't use any timestamps either.
+
+We will check if there are any variables that seem to have no significant effect in predicting the results by doing a Near Zero Variables check.
+
+Follows the routine to clean these variables:
+```{r data.cleaning}
+# Remove the timestamp columns, ID, window flags and names - assuming the quality is independent of time.
+dataset.clean <- dataset[,-(1:6)]
+validation.clean <- validation[,-(1:6)]
+
+# Remove data with excessive NAs (threshold > 50% of NAs)
+n <- length(dataset.clean[,1])
+remove.cols = sapply(dataset.clean, function(x) (sum(is.na(x))/n > 0.5))
+dataset.clean = dataset.clean[!remove.cols]
+
+n <- length(validation.clean[,1])
+remove.cols = sapply(validation.clean, function(x) (sum(is.na(x))/n > 0.1))
+validation.clean = validation.clean[!remove.cols]
+
+# Near Zero Variables check
+checkNearZeroVariables <- nearZeroVar(dataset.clean, saveMetrics=TRUE)
+if(length(checkNearZeroVariables$nzv[checkNearZeroVariables$nzv == TRUE]) == 0){
+  print("No Near Zero Variables - all of them can be relevant to prediction")
+}else{
+  warning(paste("\nThe following variable appear to be irrelevant:",colnames(dataset.clean)[checkNearZeroVariables$nzv]))
+}
+
+dim(dataset.clean);dim(validation.clean)
+```
+We have no Near Zero Variables, so all variables seem to be relevant. Now, our cleaned data and validation sets have 54 variables.
+
+
+We now create a partition for the training and test sets. We will split in 60% of the observations for training and 40% for testing.
+```{r data.partition}
+#### Creating partition with test and training sets ####
+inTrain <- createDataPartition(y=dataset.clean$classe, p=0.6, list=FALSE)
+training <- dataset.clean[inTrain,]; testing <- dataset.clean[-inTrain,]
+dim(training); dim(testing)
+```
+There are, after the partition, 11776 observations for training set and 7846 for testing set. Time to get our hands on the algorithms :)
+
+## Machine Learning algorithms testing
+The first algorithm to be tested is the Decision Tree.
+```{r decision.tree}
+modFit.decisionTree <- rpart(classe~.,method = "class", data = training)
+pred.decisionTree <- predict(modFit.decisionTree, testing, type="class")
+confusionMatrix(pred.decisionTree, testing$classe)
+
+fancyRpartPlot(modFit.decisionTree)
+```
+We can see that our Decision Tree model has an overall accuracy of 0.7483. A visual plot of the decision tree is also embedded, which help in understanding how predict a new case.
+
+Let's check if Random Forests will do better:
+
+```{r random.forest}
+modFit.randomForest <- randomForest(classe ~. , data=training)
+pred.randomForest <- predict(modFit.randomForest, testing, type="class")
+confusionMatrix(pred.randomForest, testing$classe)
+```
+
+We can see that our accuracy has greatly improved. We have now 99.45% accuracy! We won't need to use the variables that were removed in the beggining of this project.
+
+Now we apply this model to the validation set and write the results in the desired output:
+
+```{r validation}
+validation.randomForest <- predict(modFit.randomForest, validation.clean, type="class")
+
+ouputFiles <- function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+ouputFiles(validation.randomForest)
+```
