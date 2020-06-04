@@ -1,0 +1,3 @@
+# Outputs for the index.Rmd file
+
+Each of the 20 predictions for the validation file (plm_testing.csv) is written in a .txt file called "problem_id_XX.txt", where XX is the ID for the prediction.
